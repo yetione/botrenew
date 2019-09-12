@@ -1,7 +1,5 @@
-import requests
 import json
 import sys
-import time
 import CloudFlare
 from CloudFlare.exceptions import CloudFlareAPIError
 
