@@ -58,9 +58,6 @@ else:
         exit('/zones/dns_records.put %d %s - api call failed' % (e, e))
     except Exception as e:
         exit('/zones/dns_records.put - %s - api call failed' % (e))
-print('DNS Updating success! Wait for applying...')
-time.sleep(10)
-print('Success!')
 exit(0)
 
 # sudo certbot renew --preferred-challenges=dns --cert-name panel.pre.mobiumapps.com --force-renew --manual-auth-hook ./authentificator.sh --manual-public-ip-logging-ok
