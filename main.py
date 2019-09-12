@@ -2,6 +2,9 @@ import requests
 import json
 import sys
 import time
+import CloudFlare
+from CloudFlare.exceptions import CloudFlareAPIError
+
 config = json.load(open('./config.json'))
 supported_zones = ['mobiumapps.com', 'mobium.pro']
 domain = str(sys.argv[1])
@@ -10,74 +13,54 @@ try:
     searchable_zone = supported_zones[supported_zones.index('.'.join(domain.split('.')[-2:]))]
 except ValueError:
     exit(1)
+cf = CloudFlare.CloudFlare(email=config['username'], token=config['api_key'])
 
-
-class CloudFlareAPI:
-
-    def __init__(self, email, api_key):
-        self.headers = {
-            'Content-Type': 'application/json',
-            'X-Auth-Email': email,
-            'X-Auth-key': api_key
-        }
-
-    def find_zone(self, zone_name):
-        """
-
-        :type zone_name: str
-        """
-        response = requests.get('https://api.cloudflare.com/client/v4/zones', headers=self.headers,
-                                params={'name': zone_name})
-        data = response.json()
-        for zone in data['result']:  # type: object
-            if zone['name'] == zone_name:
-                return zone
-        return None
-
-    def get_zone_dns(self, zone, domain):
-        params = {
+try:
+    zone = cf.zones.get(params={'name':searchable_zone})
+except CloudFlareAPIError as e:
+    exit('/zones.get %d %s - api call failed' % (e, e))
+except Exception as e:
+    exit('/zones.get - %s - api call failed' % (e))
+zone = zone[0]
+try:
+    dns = cf.zones.dns_records.get(zone['id'], params={'type':'TXT', 'per_page':100})
+except CloudFlareAPIError as e:
+    exit('/zones/dns_records.get %d %s - api call failed' % (e, e))
+except Exception as e:
+    exit('/zones/dns_records.get - %s - api call failed' % (e))
+acme_record = None
+record_name = '_acme-challenge.'+str(domain)
+for record in dns:
+    if record['name'] == record_name:
+        acme_record = record
+        break
+if acme_record is None:
+    try:
+        res = cf.zones.dns_records.post(zone['id'], data={
             'type': 'TXT',
-            'per_page': 100
-        }
-        response = requests.get('https://api.cloudflare.com/client/v4/zones/' + str(zone['id']) + '/dns_records',
-                           headers=self.headers, params=params)
-        data = response.json()
-        for dns in data['result']:
-            if dns['name'] == '_acme-challenge.'+str(domain):
-                return dns
-        return None
-
-    def create_dns_recod(self, zone, domain, value):
-        params = {
-            'type':'TXT',
-            'name':'_acme-challenge.'+str(domain),
-            'content':value,
+            'name': record_name,
+            'content': new_key,
             'proxied': False,
-        }
-        response = requests.post('https://api.cloudflare.com/client/v4/zones/'+str(zone['id'])+'/dns_records', json=params, headers=self.headers)
-        data = response.json()
-        return data
-
-    def update_dns_record(self, zone, dns, domain, value):
-        params = {
+        })
+    except CloudFlareAPIError as e:
+        exit('/zones/dns_records.post %d %s - api call failed' % (e, e))
+    except Exception as e:
+        exit('/zones/dns_records.post - %s - api call failed' % (e))
+else:
+    try:
+        res = cf.zones.dns_records.put(zone['id'], acme_record['id'], data={
             'type': 'TXT',
-            'name': '_acme-challenge.' + str(domain),
-            'content': value,
+            'name': record_name,
+            'content': new_key,
             'proxied': False,
-        }
-        response = requests.put('https://api.cloudflare.com/client/v4/zones/' + str(zone['id']) + '/dns_records/'+str(dns['id']),
-                                 json=params, headers=self.headers)
-        data = response.json()
-        return  data
+        })
+    except CloudFlareAPIError as e:
+        exit('/zones/dns_records.put %d %s - api call failed' % (e, e))
+    except Exception as e:
+        exit('/zones/dns_records.put - %s - api call failed' % (e))
+print('DNS Updating success! Wait for applying...')
+time.sleep(10)
+print('Success!')
+exit(0)
 
-
-api = CloudFlareAPI(config['username'], config['api_key'])
-zone = api.find_zone(searchable_zone)
-if (zone is not None):
-    dns = api.get_zone_dns(zone, domain)
-    if dns is not None:
-        api.update_dns_record(zone, dns, domain, new_key)
-    else:
-        api.create_dns_recod(zone, domain, new_key)
-    time.sleep(10)
 # sudo certbot renew --preferred-challenges=dns --cert-name panel.pre.mobiumapps.com --force-renew --manual-auth-hook ./authentificator.sh --manual-public-ip-logging-ok
